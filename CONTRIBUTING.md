@@ -621,6 +621,9 @@ onMounted(async () => {
 - Invitation management
 
 **CLI Tool:**
+- Lives in its own repository:
+  [KohakuBlueleaf/Kohub-CLI](https://github.com/KohakuBlueleaf/Kohub-CLI)
+  (split out of this one: it is a client of the API, not part of the server)
 - Full-featured `kohub-cli` with interactive TUI mode
 - Repository, organization, user management
 - Branch/tag operations

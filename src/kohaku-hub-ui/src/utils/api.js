@@ -108,7 +108,8 @@ function normalizeLikersResponse(response) {
     data: {
       likers: response.data.map((user) => ({
         username: user.user || user.username,
-        full_name: user.fullname || user.full_name || user.user || user.username,
+        full_name:
+          user.fullname || user.full_name || user.user || user.username,
       })),
       total: response.data.length,
     },
@@ -329,6 +330,49 @@ export const repoAPI = {
       return false;
     }
   },
+
+  /**
+   * Import a repository from a fallback source into this hub.
+   *
+   * Backend: `kohakuhub.api.importer`. Validation (source has it, the name is
+   * free, it fits the quota) happens inside this call, so a 4xx is the real
+   * answer and not a task that fails later; a 2xx is a task id to follow.
+   *
+   * @param {Object} data - { source_repo_id, target_repo_id?, repo_type?,
+   *                          source?, revision?, private?, max_bytes? }
+   * @returns {Promise} - { import_id, task_id, repo_id, url, state, ... }
+   */
+  startImport: (data) =>
+    // Long timeout: the backend lists the source's whole tree (a repository
+    // with 100k files takes a while) before it answers. Not as long as a
+    // reset, which moves data; nothing is transferred here.
+    api.post("/api/repos/import", data, { timeout: 120000 }),
+
+  /**
+   * Follow an import by task id.
+   * @param {number} taskId
+   * @returns {Promise} - import state with progress
+   */
+  getImport: (taskId) => api.get(`/api/repos/import/${taskId}`),
+
+  /**
+   * The newest import of a repository, whatever it ended as.
+   * @param {string} repoType
+   * @param {string} repoId - namespace/name
+   * @returns {Promise} - { import: object|null }
+   */
+  getLatestImport: (repoType, repoId) =>
+    api.get("/api/repos/import/latest", {
+      params: { repo_id: repoId, repo_type: repoType },
+    }),
+
+  /**
+   * Ask an import to stop. What it staged stays staged and the partial
+   * repository stays for the user to delete.
+   * @param {number} taskId
+   * @returns {Promise} - import state
+   */
+  cancelImport: (taskId) => api.post(`/api/repos/import/${taskId}/cancel`),
 
   /**
    * Get repository metadata for specific paths
@@ -645,9 +689,12 @@ export const repoAPI = {
    * @returns {Promise} - { can_write, operations, commits: { [id]: { revert, reset } } }
    */
   getCommitsOperations: (type, namespace, name, branch, commitIds) =>
-    api.post(`/api/${type}s/${namespace}/${name}/commits/${branch}/operations`, {
-      commit_ids: commitIds,
-    }),
+    api.post(
+      `/api/${type}s/${namespace}/${name}/commits/${branch}/operations`,
+      {
+        commit_ids: commitIds,
+      },
+    ),
 
   /**
    * Whether a commit can be reverted on a branch, or the branch reset to it
@@ -659,9 +706,12 @@ export const repoAPI = {
    * @returns {Promise} - { can_write, operations, revert, reset }
    */
   getCommitOperations: (type, namespace, name, commitId, branch) =>
-    api.get(`/api/${type}s/${namespace}/${name}/commit/${commitId}/operations`, {
-      params: { branch },
-    }),
+    api.get(
+      `/api/${type}s/${namespace}/${name}/commit/${commitId}/operations`,
+      {
+        params: { branch },
+      },
+    ),
 
   /**
    * Every LFS file of a commit's tree that garbage collection removed

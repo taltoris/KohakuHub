@@ -147,8 +147,14 @@ vae = AutoencoderKL.from_pretrained("my-org/my-model")
 
 ### CLI Tool
 
+The CLI lives in its own repository: [**KohakuBlueleaf/Kohub-CLI**](https://github.com/KohakuBlueleaf/Kohub-CLI).
+It was split out of this one (it is a client of the API, not part of the
+server) and is not installed by `pip install -e .` here.
+
 ```bash
-# Install
+# Install from its own repository
+git clone https://github.com/KohakuBlueleaf/Kohub-CLI
+cd Kohub-CLI
 pip install -e .
 
 # Interactive mode
@@ -162,7 +168,9 @@ kohub-cli org create my-org
 kohub-cli org member add my-org alice --role admin
 ```
 
-See [docs/CLI.md](./docs/CLI.md) for complete CLI documentation.
+See [docs/CLI.md](./docs/CLI.md) for what the CLI offers, and
+[docs/import.md](./docs/import.md) for pulling a HuggingFace repository into
+your hub from the web UI.
 
 ### Git Clone (Native Git Support)
 
@@ -272,7 +280,7 @@ Users can provide their own tokens for external sources (e.g., HuggingFace) to a
 2. Add your HuggingFace token
 3. Tokens are encrypted and stored securely
 
-**Via CLI:**
+**Via CLI** (in the [Kohub-CLI](https://github.com/KohakuBlueleaf/Kohub-CLI) repository):
 ```bash
 kohub-cli settings user external-tokens add --url https://huggingface.co --token hf_abc123
 ```

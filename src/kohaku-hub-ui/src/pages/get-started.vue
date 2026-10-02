@@ -70,10 +70,14 @@ huggingface-cli repo create username/my-model --type model
 
 ### kohub-cli (Native Tool)
 
+The CLI lives in its own repository,
+[KohakuBlueleaf/Kohub-CLI](https://github.com/KohakuBlueleaf/Kohub-CLI): it is
+a client of this API, so this server's install does not provide it.
+
 \`\`\`bash
-# Install (from source)
-git clone https://github.com/KohakuBlueleaf/KohakuHub
-cd KohakuHub
+# Install (from its own repository)
+git clone https://github.com/KohakuBlueleaf/Kohub-CLI
+cd Kohub-CLI
 pip install -e .
 
 # Interactive TUI mode

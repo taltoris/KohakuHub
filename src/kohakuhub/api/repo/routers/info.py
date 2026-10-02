@@ -318,6 +318,19 @@ async def get_repo_info(
     if storage_info:
         response["storage"] = storage_info
 
+    # Whether this repository is a partial import. Carried on the repository
+    # info rather than left to a second request: the page must not be able to
+    # render a repository whose import failed as if it were complete just
+    # because another call failed (kohakuhub.api.importer).
+    try:
+        from kohakuhub.api.importer.task import import_summary, latest_import
+
+        import_row = latest_import(repo_type, namespace, repo_name)
+        if import_row is not None:
+            response["_import"] = import_summary(import_row)
+    except Exception as e:
+        logger.warning(f"Failed to read the import state of {repo_id}: {e}")
+
     return response
 
 

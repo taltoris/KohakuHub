@@ -140,6 +140,9 @@ Automatic transformation by fallback client!
 - Badge in header: `[☁️ External: https://huggingface.co]`
 - Disabled commits tab (not available)
 - Metadata tab works (YAML frontmatter parsed)
+- **Import to my hub** button, for a signed-in user: copies the repository into
+  their namespace as one commit, so the fallback proxy stops being involved for
+  it (see [Import](import.md))
 
 ### External User/Org Pages
 
@@ -267,4 +270,4 @@ DELETE /admin/api/fallback-sources/cache/clear  # Clear
 
 ---
 
-See also: [Admin Portal](../api/admin.md), [Configuration Reference](../reference/config.md)
+See also: [Admin Portal](../api/admin.md), [Configuration Reference](../reference/config.md), [Import](import.md)

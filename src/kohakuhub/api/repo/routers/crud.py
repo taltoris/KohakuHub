@@ -541,6 +541,97 @@ async def create_repo(
     }
 
 
+async def create_repository_for_import(
+    *, repo_type: str, namespace: str, name: str, private: bool
+) -> Repository:
+    """Create the repository an import lands in (``kohakuhub.api.importer``).
+
+    The same steps as ``create_repo`` once its request-shaped validation is
+    done, for a caller that is not an ``hf_hub`` client: it raises the HTTP
+    error instead of building the responses ``huggingface_hub`` parses (a
+    409 whose body must still carry a ``url``, and a retryable conflict while
+    LakeFS recycles a name). An import reserves its target *before* any work
+    starts, so a failure beyond this point leaves an empty repository the
+    user can delete - never a task that downloads 40 GB into nothing.
+
+    Raises:
+        HTTPException: 409 when the name is taken or LakeFS is recycling it,
+            500 when LakeFS or the database refuses the create.
+    """
+    full_id = f"{namespace}/{name}"
+    client = get_lakefs_client()
+    try:
+        lakefs_repo = await _create_lakefs_repository(
+            client,
+            repo_type,
+            full_id,
+            still_unclaimed=lambda: get_repository(repo_type, namespace, name) is None,
+        )
+    except _RepoIdClaimed:
+        raise HTTPException(
+            409,
+            detail={"error": f"Repository {full_id} already exists"},
+            headers={"X-Error-Code": HFErrorCode.REPO_EXISTS},
+        )
+    except Exception as e:
+        logger.exception(f"LakeFS repository creation failed for {full_id}", e)
+        raise HTTPException(500, detail={"error": f"LakeFS repository creation failed: {e}"})
+
+    if lakefs_repo is None:
+        # Every fresh id was taken as well: LakeFS is still releasing several
+        # previous incarnations of this name (#93). Not retried here - the
+        # import's caller decides, and the name is genuinely unavailable now.
+        raise HTTPException(
+            409,
+            detail={
+                "error": (
+                    f"Repository {full_id} is still being recycled by the storage "
+                    "layer; try the import again in a moment."
+                )
+            },
+            headers={"X-Error-Code": HFErrorCode.REPO_EXISTS},
+        )
+
+    try:
+        row, created = Repository.get_or_create(
+            repo_type=repo_type,
+            namespace=namespace,
+            name=name,
+            full_id=full_id,
+            defaults={
+                "private": private,
+                # The account the namespace names, not the request's user
+                "owner": _namespace_owner(namespace),
+                "lakefs_repo": lakefs_repo,
+            },
+        )
+    except Exception as e:
+        # A LakeFS repository without a row is unreachable; do not leave it.
+        logger.exception(f"Failed to record repository {full_id}", e)
+        await _drop_unclaimed_lakefs_repository(client, lakefs_repo)
+        raise HTTPException(500, detail={"error": f"Failed to record repository: {e}"})
+    if not created:
+        logger.info(f"Concurrent create won the race for {full_id}; dropping {lakefs_repo}")
+        await _drop_unclaimed_lakefs_repository(client, lakefs_repo)
+        raise HTTPException(
+            409,
+            detail={"error": f"Repository {full_id} already exists"},
+            headers={"X-Error-Code": HFErrorCode.REPO_EXISTS},
+        )
+
+    # Its usage counts from main's first commit (a failure leaves it to a recount)
+    try:
+        head = await client.get_branch(repository=lakefs_repo, branch=usage.MAIN)
+        usage.main_started(row.id, head["commit_id"])
+    except Exception as e:
+        logger.warning(f"Could not start counting the usage of {full_id}: {e}")
+
+    # Any fallback binding for this name was a ghost: the local repository
+    # exists now, so a later 404 path must not resurrect the binding (#79).
+    get_fallback_cache().invalidate_repo(repo_type, namespace, name)
+    return row
+
+
 class DeleteRepoPayload(BaseModel):
     """Payload for repository deletion."""
 

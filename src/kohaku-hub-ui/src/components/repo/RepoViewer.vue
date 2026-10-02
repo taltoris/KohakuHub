@@ -122,6 +122,21 @@
                 <div class="i-carbon-launch inline-block mr-1" />
                 View on {{ repoInfo._source }}
               </el-button>
+              <!--
+                The one-click version of "download it with the HF CLI, then
+                upload it here": the repository is served from a fallback
+                source, and this makes it local (kohakuhub.api.importer).
+              -->
+              <el-button
+                v-if="canOfferImport"
+                size="small"
+                type="primary"
+                data-testid="import-to-hub"
+                @click="showImportDialog = true"
+              >
+                <div class="i-carbon-cloud-download inline-block mr-1" />
+                Import to my hub
+              </el-button>
             </div>
           </div>
 
@@ -195,6 +210,17 @@
             </el-button>
           </div>
         </div>
+
+        <!-- Import state: a repository whose import did not finish holds
+             part of a snapshot, and must say so rather than look small. -->
+        <ImportStatusBanner
+          v-if="!isExternalRepo && repoImportState"
+          :import-state="repoImportState"
+          :repo-type="repoType"
+          @cancelled="onImportCancelled"
+          @deleted="onPartialDeleted"
+          @retry="showImportDialog = true"
+        />
 
         <!-- Metadata Header (Key badges) (hidden for viewer tab) -->
         <MetadataHeader
@@ -381,11 +407,8 @@
                 data-testid="file-list-count"
               >
                 {{ fileTree.length }}
-                {{ fileTree.length === 1 ? "file" : "files" }}<template
-                  v-if="fileListHasMore"
-                >
-                  loaded
-                </template>
+                {{ fileTree.length === 1 ? "file" : "files"
+                }}<template v-if="fileListHasMore"> loaded </template>
               </span>
             </div>
 
@@ -594,8 +617,8 @@
                   class="i-carbon-document-blank text-6xl mb-4 inline-block"
                 />
                 <p v-if="fileSearchQuery">
-                  No files in this directory start with
-                  "{{ fileSearchQuery }}" (case-sensitive prefix)
+                  No files in this directory start with "{{ fileSearchQuery }}"
+                  (case-sensitive prefix)
                 </p>
                 <p v-else>No files found</p>
               </div>
@@ -615,10 +638,7 @@
             Hidden when the listing is exhausted — at that point
             there is nothing to load.
           -->
-          <div
-            v-if="!filesLoading && fileListHasMore"
-            class="text-center pt-4"
-          >
+          <div v-if="!filesLoading && fileListHasMore" class="text-center pt-4">
             <el-button
               :loading="fileListLoadingMore"
               :disabled="fileListLoadingMore"
@@ -956,6 +976,16 @@ huggingface-cli download {{ repoInfo?.id }}</pre
       </div>
     </el-dialog>
 
+    <ImportRepoDialog
+      v-model="showImportDialog"
+      :repo-type="repoType"
+      :source-repo-id="`${namespace}/${name}`"
+      :source-name="repoInfo?._source || ''"
+      :source-url="repoInfo?._source_url || ''"
+      :username="authStore.user?.username || ''"
+      @started="onImportStarted"
+    />
+
     <FilePreviewDialog
       v-if="previewTarget"
       v-model:visible="previewDialogVisible"
@@ -978,10 +1008,7 @@ huggingface-cli download {{ repoInfo?.id }}</pre
 <script setup>
 import { ElMessage, ElMessageBox } from "element-plus";
 import axios from "axios";
-import {
-  formatRelativeTime,
-  formatUnixRelativeTime,
-} from "@/utils/datetime";
+import { formatRelativeTime, formatUnixRelativeTime } from "@/utils/datetime";
 
 import { useAuthStore } from "@/stores/auth";
 import { copyToClipboard } from "@/utils/clipboard";
@@ -997,6 +1024,8 @@ import DetailedMetadataPanel from "@/components/repo/metadata/DetailedMetadataPa
 import ReferencedDatasetsCard from "@/components/repo/metadata/ReferencedDatasetsCard.vue";
 import SidebarRelationshipsCard from "@/components/repo/metadata/SidebarRelationshipsCard.vue";
 import DatasetViewerTab from "@/components/repo/DatasetViewerTab.vue";
+import ImportRepoDialog from "@/components/repo/ImportRepoDialog.vue";
+import ImportStatusBanner from "@/components/repo/ImportStatusBanner.vue";
 import ErrorState from "@/components/common/ErrorState.vue";
 import FilePreviewDialog from "@/components/repo/preview/FilePreviewDialog.vue";
 import TarBrowserDialog from "@/components/repo/preview/TarBrowserDialog.vue";
@@ -1006,6 +1035,7 @@ import {
   getPreviewKind,
 } from "@/utils/file-preview";
 import { tarSidecarPath } from "@/utils/indexed-tar";
+import { canOfferImport as canImportToHub } from "@/utils/repo-import";
 
 // Fixed batch size for the file-list Load More button. The earlier
 // numbered-pager UI had a 50/100/200 selector, but with Load More the
@@ -1062,6 +1092,19 @@ const readmeContent = ref("");
 const readmeLoading = ref(true);
 const readmeMetadata = ref({});
 const showCloneDialog = ref(false);
+
+// Import-from-an-external-source state (kohakuhub.api.importer).
+// `repoImportState` is the newest import of *this* repository, whether it is
+// still running, failed, or finished: a repository whose import did not
+// finish holds a partial snapshot, and the page has to say so instead of
+// rendering what arrived as if it were the whole repository. Null for a
+// repository that was not imported.
+const showImportDialog = ref(false);
+const repoImportState = ref(null);
+let importPollHandle = null;
+// Slower than an upload's progress tick: an import is minutes to hours, and
+// every poll is a database read on the backend.
+const IMPORT_POLL_MS = 5000;
 const fileSearchQuery = ref("");
 const isLiked = ref(false);
 const likesCount = ref(0);
@@ -1263,6 +1306,20 @@ const externalSourceName = computed(() => {
   return repoInfo.value?._source || "external source";
 });
 
+// Importing is offered on an external repository (there is a copy to pull)
+// to a signed-in user (they have a namespace to put it in). A repository
+// being imported right now is also excluded: importing it again would aim a
+// second snapshot at a target that is still being written.
+const canOfferImport = computed(() =>
+  canImportToHub({
+    isExternal: Boolean(isExternalRepo.value),
+    isAuthenticated: Boolean(authStore.isAuthenticated),
+    isImporting:
+      repoImportState.value?.state === "running" ||
+      repoImportState.value?.state === "queued",
+  }),
+);
+
 // Methods
 function getIconClass(type) {
   const icons = {
@@ -1428,6 +1485,11 @@ async function loadRepoInfo() {
     // Check if namespace is an org (for correct linking)
     checkIfNamespaceIsOrg();
 
+    // Whether this repository is a partial import has to be known either
+    // way, so it is asked on every load rather than after an import this
+    // browser did not start (someone else's import, or an older one).
+    loadImportState();
+
     // Check if current user has liked (only if authenticated)
     if (authStore.isAuthenticated) {
       try {
@@ -1489,6 +1551,88 @@ async function toggleLike() {
   } finally {
     likingInProgress.value = false;
   }
+}
+
+// ===== Import from an external source (kohakuhub.api.importer) =====
+
+/**
+ * The import of this repository, running, failed or finished.
+ *
+ * It rides on the repository info the page has already fetched (`_import`),
+ * because the backend puts it there: a page that had to ask separately could
+ * render a repository whose import failed as a complete one whenever that
+ * second request was the one that failed. A repository served from a fallback
+ * source has no local import, so the field is absent, which reads as null.
+ */
+function loadImportState() {
+  repoImportState.value = repoInfo.value?._import || null;
+  syncImportPolling();
+}
+
+/**
+ * Poll an in-flight import; stop the moment it is not in flight.
+ *
+ * Only a running import's progress changes. A terminal one is settled, so
+ * asking about it forever would be a request per tick for nothing.
+ */
+function syncImportPolling() {
+  const inFlight =
+    repoImportState.value?.state === "running" ||
+    repoImportState.value?.state === "queued";
+  if (inFlight && importPollHandle === null) {
+    importPollHandle = setInterval(refreshImportState, IMPORT_POLL_MS);
+  } else if (!inFlight) {
+    stopImportPolling();
+  }
+}
+
+async function refreshImportState() {
+  const taskId = repoImportState.value?.task_id;
+  if (!taskId) {
+    return;
+  }
+  try {
+    const { data } = await repoAPI.getImport(taskId);
+    repoImportState.value = data;
+    syncImportPolling();
+  } catch (err) {
+    // The repository itself is on screen and readable; only its progress is
+    // not. Drop the poll instead of hammering a failing endpoint.
+    console.warn("Could not refresh the import state:", err);
+    stopImportPolling();
+  }
+}
+
+function stopImportPolling() {
+  if (importPollHandle !== null) {
+    clearInterval(importPollHandle);
+    importPollHandle = null;
+  }
+}
+
+/** The dialog started an import: show it at once, then let the poll follow it. */
+function onImportStarted(started) {
+  repoImportState.value = {
+    ...started,
+    state: started.state || "queued",
+  };
+  syncImportPolling();
+  // A running import is writing to the target repository, so that is the
+  // page to be on: the source stays reachable from there once it is local.
+  if (started.repo_id) {
+    router.push(`/${props.repoType}s/${started.repo_id}`);
+  }
+}
+
+function onImportCancelled(updated) {
+  repoImportState.value = updated;
+  syncImportPolling();
+}
+
+/** The partial repository is gone, so this page has nothing left to show. */
+function onPartialDeleted() {
+  stopImportPolling();
+  router.push(`/${props.repoType}s`);
 }
 
 function activeNamePrefix() {
@@ -1594,8 +1738,7 @@ async function loadFileTree({ resetPagination = true } = {}) {
       // Axios interceptor in utils/api.js attaches `.classification`.
       // Prefer it; fall back to classifying the bare error ourselves
       // if a future refactor changes the interceptor.
-      treeErrorClassification.value =
-        err?.classification || classifyError(err);
+      treeErrorClassification.value = err?.classification || classifyError(err);
     }
   } finally {
     if (requestId === fileTreeRequestId.value) {
@@ -1651,10 +1794,7 @@ async function loadMoreFileTree() {
     // Sort across the union so the appended rows respect the same
     // directories-first / alphabetical ordering as the initial load.
     appendedEntries = page.entries || [];
-    fileTree.value = sortFileEntries([
-      ...fileTree.value,
-      ...appendedEntries,
-    ]);
+    fileTree.value = sortFileEntries([...fileTree.value, ...appendedEntries]);
     fileListNextCursor.value = page.nextCursor || null;
   } catch (err) {
     console.error("Failed to load more file tree entries:", err);
@@ -1784,8 +1924,7 @@ async function loadReadme() {
     }
   } catch (err) {
     console.error("Failed to load README:", err);
-    readmeErrorClassification.value =
-      err?.classification || classifyError(err);
+    readmeErrorClassification.value = err?.classification || classifyError(err);
     readmeContent.value = "";
     readmeMetadata.value = {};
   } finally {
@@ -1838,7 +1977,8 @@ function unavailableOperations(commitId) {
 function filesUnavailableMessage(commitId) {
   const paths = commitUnavailableFiles.value[commitId];
   const shown = paths.slice(0, SHOWN_FILES).join(", ");
-  const more = paths.length > SHOWN_FILES ? ` and ${paths.length - SHOWN_FILES} more` : "";
+  const more =
+    paths.length > SHOWN_FILES ? ` and ${paths.length - SHOWN_FILES} more` : "";
   return `Files this commit committed are no longer stored (garbage collected): ${shown}${more}.`;
 }
 
@@ -2176,4 +2316,8 @@ onMounted(async () => {
     await loadCommits();
   }
 });
+
+// An import's poll is an interval, so it outlives the component unless it is
+// stopped: leaving the page must not keep asking the backend about it.
+onUnmounted(stopImportPolling);
 </script>

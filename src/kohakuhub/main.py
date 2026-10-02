@@ -38,6 +38,7 @@ from kohakuhub.auth.permissions import RepoReadDeniedError
 from kohakuhub.utils.s3 import init_storage
 from kohakuhub.api.git.routers import http as git_http
 from kohakuhub.api.git.routers import lfs, ssh_keys
+from kohakuhub.api.importer import router as importer_router
 from kohakuhub.api.repo.routers import crud as repo_crud
 from kohakuhub.api.repo.routers import info as repo_info
 from kohakuhub.api.repo.routers import tree as repo_tree
@@ -186,6 +187,10 @@ app.add_middleware(
 app.include_router(auth_router, prefix=cfg.app.api_base)
 app.include_router(external_tokens.router, prefix=cfg.app.api_base, tags=["auth"])
 app.include_router(repo_crud.router, prefix=cfg.app.api_base, tags=["repositories"])
+# Importing a repository from a fallback source (kohakuhub.api.importer).
+# Registered here so its /repos/import paths resolve before the catch-all
+# 501 routes at the bottom of this file.
+app.include_router(importer_router, prefix=cfg.app.api_base, tags=["repositories"])
 app.include_router(repo_info.router, prefix=cfg.app.api_base, tags=["repositories"])
 app.include_router(repo_tree.router, prefix=cfg.app.api_base, tags=["repositories"])
 app.include_router(files.router, prefix=cfg.app.api_base, tags=["files"])

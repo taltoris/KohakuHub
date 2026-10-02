@@ -2,7 +2,22 @@
 
 *Last Updated: January 2025*
 
-**Status:** ✅ Fully Implemented and Functional
+> **The CLI is not part of this repository.** `kohub-cli` lives in
+> [**KohakuBlueleaf/Kohub-CLI**](https://github.com/KohakuBlueleaf/Kohub-CLI)
+> and was split out of this one: it is a client of the API, not part of the
+> server. `pip install -e .` here installs the hub only, and gives you no
+> `kohub-cli` command. Install the CLI from its own repository:
+>
+> ```bash
+> git clone https://github.com/KohakuBlueleaf/Kohub-CLI
+> cd Kohub-CLI
+> pip install -e .
+> ```
+>
+> The commands below describe that CLI. This page is kept here because it
+> documents the API surface the CLI drives, which this repository does own.
+
+**Status:** ✅ Fully Implemented and Functional (in the Kohub-CLI repository)
 
 ## Quick Reference
 

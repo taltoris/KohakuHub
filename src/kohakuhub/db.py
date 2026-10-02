@@ -678,6 +678,59 @@ class LfsGcState(BaseModel):
         table_name = "lfs_gc_state"
 
 
+class RepositoryImport(BaseModel):
+    """An import of a repository from a fallback source into this hub.
+
+    Written when the import is accepted, kept afterwards, and read by the
+    repository page: a repository whose import did not finish is a partial
+    copy, and the page says so instead of showing an empty repository as if
+    it were complete (see ``kohakuhub.api.importer``).
+
+    ``state`` is the outcome as people see it (``queued``, ``running``,
+    ``succeeded``, ``failed``, ``cancelled``); the task row of
+    ``repo.import`` carries the attempts, logs and progress timeline.
+    """
+
+    id = BigAutoField()
+    repository = ForeignKeyField(Repository, on_delete="CASCADE", index=True)
+    repo_type = CharField(max_length=16)
+    source_repo_id = CharField(max_length=255)  # namespace/name at the source
+    source_revision = CharField(max_length=255, default="main")
+    source_url = CharField(max_length=255)
+    source_name = CharField(max_length=255)
+    source_type = CharField(max_length=32)  # huggingface or kohakuhub
+    # The token the import reads the source with, encrypted like a user's
+    # external token. The source's own token when the user has none: the
+    # worker has no request, so what it needs must be stored, and a task
+    # payload may not carry credentials (kohakuhub.tasks.enqueue).
+    source_token = TextField(null=True)
+    requested_by = ForeignKeyField(
+        User, on_delete=DB_ON_DELETE_SET_NULL, null=True, index=True
+    )
+    state = CharField(max_length=16, default="queued", index=True)
+    stage = CharField(max_length=255, null=True)
+    files_total = IntegerField(default=0)
+    files_done = IntegerField(default=0)
+    bytes_total = BigIntegerField(default=0)
+    bytes_done = BigIntegerField(default=0)
+    # Storage this import may use, from the target namespace's quota at the
+    # time it was accepted (NULL = unlimited). Checked as bytes arrive, so a
+    # source that grows past the tree it listed stops at the quota instead
+    # of filling the disk (kohakuhub.api.quota.util).
+    allowed_bytes = BigIntegerField(null=True)
+    error = TextField(null=True)
+    commit_id = CharField(max_length=64, null=True)
+    created_at = DateTimeField(default=utcnow)
+    updated_at = DateTimeField(default=utcnow)
+
+    class Meta:
+        table_name = "repository_import"
+        indexes = (
+            (("repository", "state"), False),
+            (("state", "created_at"), False),
+        )
+
+
 class RepositoryWrite(BaseModel):
     """A write about to move a branch of a repository in LakeFS.
 
@@ -763,6 +816,7 @@ def init_db():
             LfsHeadRef,
             LfsGcState,
             RepositoryWrite,
+            RepositoryImport,
         ],
         safe=True,
     )
